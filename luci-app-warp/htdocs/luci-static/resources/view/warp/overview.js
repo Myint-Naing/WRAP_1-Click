@@ -24,7 +24,12 @@ return L.view.extend({
 		return fs.exec('/usr/bin/warp-script', [action])
 			.then(function(res) {
 				ui.hideModal();
-				location.reload();
+				if (res.code !== 0) {
+					var errText = (res.stderr && res.stderr.trim()) ? res.stderr.trim() : _('Execution failed with code ') + res.code;
+					ui.addNotification(null, E('p', _('Action failed: ') + errText));
+				} else {
+					location.reload();
+				}
 			})
 			.catch(function(err) {
 				ui.hideModal();
@@ -34,7 +39,7 @@ return L.view.extend({
 
 	renderStatus: function(statusData, netData) {
 		var isConnected = false;
-		if (netData && netData.isUp && netData.isUp()) {
+		if (netData && typeof netData.isUp === 'function' && netData.isUp()) {
 			isConnected = true;
 		} else if (statusData && statusData.enabled === '1' && statusData.status === 'connected') {
 			isConnected = true;
@@ -45,9 +50,9 @@ return L.view.extend({
 			E('span', { 'class': 'label danger' }, _('Disconnected'));
 
 		var timeRemainingText = _('N/A');
-		if (statusData && statusData.time_remaining_seconds) {
+		if (statusData && statusData.time_remaining_seconds !== undefined && statusData.time_remaining_seconds !== null) {
 			var totalSec = parseInt(statusData.time_remaining_seconds, 10);
-			if (totalSec > 0) {
+			if (!isNaN(totalSec) && totalSec > 0) {
 				var days = Math.floor(totalSec / 86400);
 				var hours = Math.floor((totalSec % 86400) / 3600);
 				var mins = Math.floor((totalSec % 3600) / 60);
@@ -89,11 +94,14 @@ return L.view.extend({
 
 		return Promise.all([
 			fs.exec('/usr/bin/warp-script', ['status']).then(function(res) {
-				try {
-					return JSON.parse(res.stdout);
-				} catch(e) {
-					return {};
+				if (res && res.code === 0 && res.stdout) {
+					try {
+						return JSON.parse(res.stdout);
+					} catch(e) {
+						return {};
+					}
 				}
+				return {};
 			}).catch(function() { return {}; }),
 			L.resolveDefault(network.getDevice('warp'), null),
 			L.resolveDefault(network.getNetwork('warp'), null)
@@ -102,7 +110,7 @@ return L.view.extend({
 			var netDev = results[1];
 			var netIface = results[2];
 
-			var isUp = (netIface && netIface.isUp && netIface.isUp()) || (statusData.enabled === '1');
+			var isUp = (netIface && typeof netIface.isUp === 'function' && netIface.isUp()) || (statusData.enabled === '1');
 
 			var btnEnable = E('button', {
 				'class': 'btn cbi-button cbi-button-action',

@@ -1,6 +1,8 @@
 #!/bin/sh
 # /usr/bin/warp-script - Backend script for 1-Click Cloudflare WARP WireGuard integration
 
+umask 077
+
 WARP_API_URL="https://api.cloudflareclient.com/v0a737/reg"
 WARP_DEVICE_TYPE="Linux"
 WARP_LOCALE="en_US"
@@ -8,6 +10,17 @@ WARP_LOCALE="en_US"
 log() {
 	logger -t "warp-script" "$*"
 	echo "[warp-script] $*"
+}
+
+parse_iso_to_epoch() {
+	local iso_str="$1"
+	[ -z "$iso_str" ] && echo "" && return
+	# Remove sub-second fraction if present (e.g. .642234827Z -> Z) for BusyBox date compatibility
+	local clean_iso
+	clean_iso=$(echo "$iso_str" | sed -E 's/\.[0-9]+//g')
+	local epoch
+	epoch=$(date -u -d "$clean_iso" +%s 2>/dev/null)
+	echo "$epoch"
 }
 
 json_extract() {
@@ -84,6 +97,10 @@ remove_firewall() {
 do_register() {
 	check_dependencies || exit 1
 
+	local tmp_payload
+	tmp_payload=$(mktemp /tmp/warp_payload.XXXXXX)
+	trap 'rm -f "$tmp_payload"' EXIT INT TERM
+
 	log "Generating WireGuard keypair..."
 	PRIVATE_KEY=$(wg genkey)
 	PUBLIC_KEY=$(echo "$PRIVATE_KEY" | wg pubkey)
@@ -95,7 +112,7 @@ do_register() {
 
 	TOS_DATE=$(date -u +"%Y-%m-%dT%H:%M:%S.000+00:00" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-	PAYLOAD=$(cat <<EOF
+	cat <<EOF > "$tmp_payload"
 {
 	"key": "$PUBLIC_KEY",
 	"install_id": "",
@@ -105,18 +122,20 @@ do_register() {
 	"locale": "$WARP_LOCALE"
 }
 EOF
-)
 
 	log "Registering with Cloudflare WARP API..."
 	RESPONSE=$(curl -sS -f -X POST \
 		-H "Content-Type: application/json" \
 		-H "User-Agent: okhttp/3.12.1" \
-		-d "$PAYLOAD" \
+		-d @"$tmp_payload" \
 		"$WARP_API_URL" 2>&1)
 
 	CURL_RET=$?
+	rm -f "$tmp_payload"
+	trap - EXIT INT TERM
+
 	if [ $CURL_RET -ne 0 ] || [ -z "$RESPONSE" ]; then
-		log "Error registering with WARP API: $RESPONSE"
+		log "Error registering with WARP API"
 		exit 1
 	fi
 
@@ -132,7 +151,6 @@ EOF
 
 	if [ -z "$PEER_PUBLIC_KEY" ] || [ -z "$INTERFACE_IPV4" ]; then
 		log "Error: Failed to parse Cloudflare WARP API response"
-		log "Response: $RESPONSE"
 		exit 1
 	fi
 
@@ -147,13 +165,13 @@ EOF
 	NOW=$(date +%s)
 	CREATED_AT_EPOCH=""
 	if [ -n "$CREATED_AT" ]; then
-		CREATED_AT_EPOCH=$(date -u -d "$CREATED_AT" +%s 2>/dev/null)
+		CREATED_AT_EPOCH=$(parse_iso_to_epoch "$CREATED_AT")
 	fi
 	[ -z "$CREATED_AT_EPOCH" ] && CREATED_AT_EPOCH="$NOW"
 
 	EXPIRES_AT_EPOCH=""
 	if [ -n "$EXPIRES_AT" ]; then
-		EXPIRES_AT_EPOCH=$(date -u -d "$EXPIRES_AT" +%s 2>/dev/null)
+		EXPIRES_AT_EPOCH=$(parse_iso_to_epoch "$EXPIRES_AT")
 	fi
 	# Default WARP key TTL is ~30 days (2592000 seconds) if unspecified
 	if [ -z "$EXPIRES_AT_EPOCH" ] || [ "$EXPIRES_AT_EPOCH" -le "$NOW" ]; then
@@ -242,7 +260,7 @@ do_status() {
 	expires_at_epoch=$(uci -q get warp.status.expires_at_epoch || echo "0")
 	now=$(date +%s)
 
-	if [ "$expires_at_epoch" -gt 0 ] && [ "$expires_at_epoch" -gt "$now" ]; then
+	if [ "$expires_at_epoch" -gt 0 ] 2>/dev/null && [ "$expires_at_epoch" -gt "$now" ] 2>/dev/null; then
 		time_remaining=$((expires_at_epoch - now))
 	else
 		time_remaining=0

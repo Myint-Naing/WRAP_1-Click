@@ -1,12 +1,21 @@
 #!/bin/sh
 # /usr/bin/warp-renew - Automated renewal script for Cloudflare WARP key
 
+umask 077
+
 RENEW_WINDOW=172800 # 48 hours in seconds
+LOCKDIR="/var/lock/warp-renew.lock"
 
 log() {
 	logger -t "warp-renew" "$*"
 	echo "[warp-renew] $*"
 }
+
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+	log "Another warp-renew process is already running. Exiting."
+	exit 0
+fi
+trap 'rmdir "$LOCKDIR" 2>/dev/null' EXIT INT TERM
 
 auto_renew_enabled=$(uci -q get warp.main.auto_renew || echo "1")
 enabled=$(uci -q get warp.main.enabled || echo "0")
@@ -24,7 +33,7 @@ fi
 expires_at_epoch=$(uci -q get warp.status.expires_at_epoch || echo "0")
 now=$(date +%s)
 
-if [ "$expires_at_epoch" -eq 0 ]; then
+if [ -z "$expires_at_epoch" ] || [ "$expires_at_epoch" -eq 0 ] 2>/dev/null; then
 	log "No expiration timestamp recorded. Triggering renewal."
 	/usr/bin/warp-script renew
 	exit $?
