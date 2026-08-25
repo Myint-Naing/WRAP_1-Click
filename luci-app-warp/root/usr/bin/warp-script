@@ -147,13 +147,15 @@ EOF
 	NOW=$(date +%s)
 	CREATED_AT_EPOCH=""
 	if [ -n "$CREATED_AT" ]; then
-		CREATED_AT_EPOCH=$(date -u -d "$CREATED_AT" +%s 2>/dev/null)
+		CREATED_AT_CLEAN=$(echo "$CREATED_AT" | sed 's/T/ /; s/\..*//; s/Z//')
+		CREATED_AT_EPOCH=$(date -u -d "$CREATED_AT_CLEAN" +%s 2>/dev/null || date -u -d "$CREATED_AT" +%s 2>/dev/null)
 	fi
 	[ -z "$CREATED_AT_EPOCH" ] && CREATED_AT_EPOCH="$NOW"
 
 	EXPIRES_AT_EPOCH=""
 	if [ -n "$EXPIRES_AT" ]; then
-		EXPIRES_AT_EPOCH=$(date -u -d "$EXPIRES_AT" +%s 2>/dev/null)
+		EXPIRES_AT_CLEAN=$(echo "$EXPIRES_AT" | sed 's/T/ /; s/\..*//; s/Z//')
+		EXPIRES_AT_EPOCH=$(date -u -d "$EXPIRES_AT_CLEAN" +%s 2>/dev/null || date -u -d "$EXPIRES_AT" +%s 2>/dev/null)
 	fi
 	# Default WARP key TTL is ~30 days (2592000 seconds) if unspecified
 	if [ -z "$EXPIRES_AT_EPOCH" ] || [ "$EXPIRES_AT_EPOCH" -le "$NOW" ]; then

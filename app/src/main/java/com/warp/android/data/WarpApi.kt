@@ -91,7 +91,7 @@ class WarpApi(private val context: Context) {
 
     private val apiService: WarpApiService by lazy {
         val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            level = HttpLoggingInterceptor.Level.BASIC
         }
         val okHttpClient = OkHttpClient.Builder()
             .addInterceptor(logging)
@@ -132,14 +132,20 @@ class WarpApi(private val context: Context) {
 
         val response = apiService.register(request)
 
-        val peerPublicKey = response.config?.peers?.firstOrNull()?.publicKey
+        val config = response.config
+            ?: throw IllegalStateException("Missing config in WARP response")
+
+        val peerPublicKey = config.peers?.firstOrNull()?.publicKey
             ?: throw IllegalStateException("Missing peer public key in WARP response")
 
-        val ipv4 = response.config.interfaceInfo?.addresses?.ipv4
+        val interfaceAddresses = config.interfaceInfo?.addresses
+            ?: throw IllegalStateException("Missing interface addresses in WARP response")
+
+        val ipv4 = interfaceAddresses.ipv4
             ?: throw IllegalStateException("Missing IPv4 address in WARP response")
 
-        val ipv6 = response.config.interfaceInfo.addresses.ipv6
-        val endpointHost = response.config.peers.firstOrNull()?.endpoint?.host ?: "engage.cloudflareclient.com:2408"
+        val ipv6 = interfaceAddresses.ipv6
+        val endpointHost = config.peers.firstOrNull()?.endpoint?.host ?: "engage.cloudflareclient.com:2408"
         val licenseKey = response.account?.license
 
         val expirationTimestampEpochMs = parseExpirationTimestamp(
