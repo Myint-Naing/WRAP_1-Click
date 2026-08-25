@@ -1,0 +1,50 @@
+#!/bin/sh
+# /usr/bin/warp-renew - Automated renewal script for Cloudflare WARP key
+
+RENEW_WINDOW=172800 # 48 hours in seconds
+
+log() {
+	logger -t "warp-renew" "$*"
+	echo "[warp-renew] $*"
+}
+
+auto_renew_enabled=$(uci -q get warp.main.auto_renew || echo "1")
+enabled=$(uci -q get warp.main.enabled || echo "0")
+
+if [ "$enabled" != "1" ]; then
+	log "WARP is disabled. Skipping check."
+	exit 0
+fi
+
+if [ "$auto_renew_enabled" != "1" ]; then
+	log "Auto-renew is disabled in config. Skipping."
+	exit 0
+fi
+
+expires_at_epoch=$(uci -q get warp.status.expires_at_epoch || echo "0")
+now=$(date +%s)
+
+if [ "$expires_at_epoch" -eq 0 ]; then
+	log "No expiration timestamp recorded. Triggering renewal."
+	/usr/bin/warp-script renew
+	exit $?
+fi
+
+time_until_expiry=$((expires_at_epoch - now))
+
+log "Current time: $now, Expiration time: $expires_at_epoch, Time remaining: ${time_until_expiry}s"
+
+if [ "$time_until_expiry" -le "$RENEW_WINDOW" ]; then
+	log "Key expires within 48 hours (${time_until_expiry}s remaining). Renewing WARP key..."
+	/usr/bin/warp-script renew
+	RENEW_STATUS=$?
+	if [ $RENEW_STATUS -eq 0 ]; then
+		log "WARP key successfully renewed and interface reloaded."
+	else
+		log "Failed to renew WARP key."
+	fi
+	exit $RENEW_STATUS
+else
+	hours_remaining=$((time_until_expiry / 3600))
+	log "Key is valid for another ${hours_remaining} hours. No renewal required yet."
+fi
